@@ -180,29 +180,49 @@
  */
 
 struct hllhdr {
+    // 字符串 “HYLL”
     char magic[4];      /* "HYLL" */
+    // 存储格式 HLL_DENSE 或 HLL_SPARSE
     uint8_t encoding;   /* HLL_DENSE or HLL_SPARSE. */
+    // 占位符，必须为0
     uint8_t notused[3]; /* Reserved for future use, must be zero. */
+    // 缓存结果，如果上次查询到现在数据没有修改过，可从中直接取出结果
     uint8_t card[8];    /* Cached cardinality, little endian. */
+    // 数据块
     uint8_t registers[]; /* Data bytes. */
 };
 
 /* The cached cardinality MSB is used to signal validity of the cached value. */
+/* 设定 hllhdr 结构体中 cache cardinality 的可用性，在每次数据修改过后， cache 不可
+ * 用，card[0] 左数第七位设为 1；在每次查询结束后，保存 cache，card[0] 左数第七位设
+ * 为0。*/
 #define HLL_INVALIDATE_CACHE(hdr) (hdr)->card[0] |= (1<<7)
 #define HLL_VALID_CACHE(hdr) (((hdr)->card[0] & (1<<7)) == 0)
 
+// 14 位作为桶的编号
 #define HLL_P 14 /* The greater is P, the smaller the error. */
+// 16384 个桶
 #define HLL_REGISTERS (1<<HLL_P) /* With P=14, 16384 registers. */
+// 桶掩码
 #define HLL_P_MASK (HLL_REGISTERS-1) /* Mask to index register. */
+// 前导零存储位数 6 位，最大为 63
 #define HLL_BITS 6 /* Enough to count up to 63 leading zeroes. */
+// 最大前导零个数，63
 #define HLL_REGISTER_MAX ((1<<HLL_BITS)-1)
+// hllhdr 结构体大小
 #define HLL_HDR_SIZE sizeof(struct hllhdr)
+// hllhdr 为稠密存储时的总大小，hllhdr 结构体大小 + (桶个数 * 每个桶 bit 数 + 7) / 8
 #define HLL_DENSE_SIZE (HLL_HDR_SIZE+((HLL_REGISTERS*HLL_BITS+7)/8))
+// 稠密结构编码
 #define HLL_DENSE 0 /* Dense encoding. */
+// 稀疏结构编码
 #define HLL_SPARSE 1 /* Sparse encoding. */
+// 不成熟结构编码，仅内部使用
 #define HLL_RAW 255 /* Only used internally, never exposed. */
+// 最大编码数字，用于判定编码合法性
 #define HLL_MAX_ENCODING 1
 
+// 报错信息
 static char *invalid_hll_err = "-INVALIDOBJ Corrupted HLL object detected\r\n";
 
 /* =========================== Low level bit macros ========================= */
@@ -334,6 +354,7 @@ static char *invalid_hll_err = "-INVALIDOBJ Corrupted HLL object detected\r\n";
 
 /* Store the value of the register at position 'regnum' into variable 'target'.
  * 'p' is an array of unsigned bytes. */
+/* 获得编号为 regnum 的桶的数据，结果存在 target 中，p 为无符号比特数组。*/
 #define HLL_DENSE_GET_REGISTER(target,p,regnum) do { \
     uint8_t *_p = (uint8_t*) p; \
     unsigned long _byte = regnum*HLL_BITS/8; \
@@ -346,6 +367,7 @@ static char *invalid_hll_err = "-INVALIDOBJ Corrupted HLL object detected\r\n";
 
 /* Set the value of the register at position 'regnum' to 'val'.
  * 'p' is an array of unsigned bytes. */
+/* 将编号为 regnum 的桶设为 val， p 为无符号比特数组*/
 #define HLL_DENSE_SET_REGISTER(p,regnum,val) do { \
     uint8_t *_p = (uint8_t*) p; \
     unsigned long _byte = regnum*HLL_BITS/8; \
@@ -360,25 +382,42 @@ static char *invalid_hll_err = "-INVALIDOBJ Corrupted HLL object detected\r\n";
 
 /* Macros to access the sparse representation.
  * The macros parameter is expected to be an uint8_t pointer. */
+/* 稀疏实现使用的宏，宏的参数需要时 uint8_t 类型的指针 */
+// XZERO 类型的前缀
 #define HLL_SPARSE_XZERO_BIT 0x40 /* 01xxxxxx */
+// VAL 类型的前缀
 #define HLL_SPARSE_VAL_BIT 0x80 /* 1vvvvvxx */
+// 判定是否为 ZERO 类型
 #define HLL_SPARSE_IS_ZERO(p) (((*(p)) & 0xc0) == 0) /* 00xxxxxx */
+// 判定是否为 XZERO 类型
 #define HLL_SPARSE_IS_XZERO(p) (((*(p)) & 0xc0) == HLL_SPARSE_XZERO_BIT)
+// 判定是否为 VAL 类型
 #define HLL_SPARSE_IS_VAL(p) ((*(p)) & HLL_SPARSE_VAL_BIT)
+// 获取 ZERO 的长度
 #define HLL_SPARSE_ZERO_LEN(p) (((*(p)) & 0x3f)+1)
+// 获取 XZERO 的长度
 #define HLL_SPARSE_XZERO_LEN(p) (((((*(p)) & 0x3f) << 8) | (*((p)+1)))+1)
+// 获取 VAL 的值
 #define HLL_SPARSE_VAL_VALUE(p) ((((*(p)) >> 2) & 0x1f)+1)
+// 获取 VAL 的长度
 #define HLL_SPARSE_VAL_LEN(p) (((*(p)) & 0x3)+1)
+// VAL 最大的值
 #define HLL_SPARSE_VAL_MAX_VALUE 32
+// VAL 最大的长度
 #define HLL_SPARSE_VAL_MAX_LEN 4
+// ZERO 最大的值
 #define HLL_SPARSE_ZERO_MAX_LEN 64
+// XZERO 最大的值
 #define HLL_SPARSE_XZERO_MAX_LEN 16384
+// 将 VAL 的值设为 val，长度设为 len
 #define HLL_SPARSE_VAL_SET(p,val,len) do { \
     *(p) = (((val)-1)<<2|((len)-1))|HLL_SPARSE_VAL_BIT; \
 } while(0)
+// 将 ZERO 的长度设为 len
 #define HLL_SPARSE_ZERO_SET(p,len) do { \
     *(p) = (len)-1; \
 } while(0)
+// 将 XZERO 的长度设为 len
 #define HLL_SPARSE_XZERO_SET(p,len) do { \
     int _l = (len)-1; \
     *(p) = (_l>>8) | HLL_SPARSE_XZERO_BIT; \
@@ -390,6 +429,8 @@ static char *invalid_hll_err = "-INVALIDOBJ Corrupted HLL object detected\r\n";
 /* Our hash function is MurmurHash2, 64 bit version.
  * It was modified for Redis in order to provide the same result in
  * big and little endian archs (endian neutral). */
+/* 哈希算法 MurmurHash2，64 位版本。为了使大端和小端字节序相同对算法
+ * 做了一定修改 */
 uint64_t MurmurHash64A (const void * key, int len, unsigned int seed) {
     const uint64_t m = 0xc6a4a7935bd1e995;
     const int r = 47;
@@ -441,6 +482,8 @@ uint64_t MurmurHash64A (const void * key, int len, unsigned int seed) {
 /* Given a string element to add to the HyperLogLog, returns the length
  * of the pattern 000..1 of the element hash. As a side effect 'regp' is
  * set to the register index this element hashes to. */
+/* 给定一个字符串 ele，返回它哈希后前导零的个数，并将其桶序号存在 regp 参
+ * 数中。 */
 int hllPatLen(unsigned char *ele, size_t elesize, long *regp) {
     uint64_t hash, bit, index;
     int count;
@@ -482,6 +525,7 @@ int hllPatLen(unsigned char *ele, size_t elesize, long *regp) {
  * The function always succeed, however if as a result of the operation
  * the approximated cardinality changed, 1 is returned. Otherwise 0
  * is returned. */
+/* 在稠密结构的 registers 中加入字符串 ele */
 int hllDenseAdd(uint8_t *registers, unsigned char *ele, size_t elesize) {
     uint8_t oldcount, count;
     long index;
@@ -501,6 +545,8 @@ int hllDenseAdd(uint8_t *registers, unsigned char *ele, size_t elesize) {
  * PE is an array with a pre-computer table of values 2^-reg indexed by reg.
  * As a side effect the integer pointed by 'ezp' is set to the number
  * of zero registers. */
+/* 计算稠密结构的 registers 的总和，PE 是预先计算的 2^-reg 的参数，作为前导
+ * 零的可能性。 */
 double hllDenseSum(uint8_t *registers, double *PE, int *ezp) {
     double E = 0;
     int j, ez = 0;
@@ -514,6 +560,7 @@ double hllDenseSum(uint8_t *registers, double *PE, int *ezp) {
                       r10, r11, r12, r13, r14, r15;
         for (j = 0; j < 1024; j++) {
             /* Handle 16 registers per iteration. */
+            // 每次循环计算 16 个桶
             r0 = r[0] & 63; if (r0 == 0) ez++;
             r1 = (r[0] >> 6 | r[1] << 2) & 63; if (r1 == 0) ez++;
             r2 = (r[1] >> 4 | r[2] << 4) & 63; if (r2 == 0) ez++;
@@ -534,6 +581,7 @@ double hllDenseSum(uint8_t *registers, double *PE, int *ezp) {
             /* Additional parens will allow the compiler to optimize the
              * code more with a loss of precision that is not very relevant
              * here (floating point math is not commutative!). */
+            /* 为了减少因为浮点数计算造成的精度损耗而额外添加的括号 */
             E += (PE[r0] + PE[r1]) + (PE[r2] + PE[r3]) + (PE[r4] + PE[r5]) +
                  (PE[r6] + PE[r7]) + (PE[r8] + PE[r9]) + (PE[r10] + PE[r11]) +
                  (PE[r12] + PE[r13]) + (PE[r14] + PE[r15]);
@@ -565,6 +613,7 @@ double hllDenseSum(uint8_t *registers, double *PE, int *ezp) {
  *
  * The function returns REDIS_OK if the sparse representation was valid,
  * otherwise REDIS_ERR is returned if the representation was corrupted. */
+/* 稀疏结构转稠密结构 */
 int hllSparseToDense(robj *o) {
     sds sparse = o->ptr, dense;
     struct hllhdr *hdr, *oldhdr = (struct hllhdr*)sparse;
@@ -635,6 +684,7 @@ int hllSparseToDense(robj *o) {
  * sparse to dense: this happens when a register requires to be set to a value
  * not representable with the sparse representation, or when the resulting
  * size would be greater than server.hll_sparse_max_bytes. */
+/* 稀疏结构中添加字符串 ele */
 int hllSparseAdd(robj *o, unsigned char *ele, size_t elesize) {
     struct hllhdr *hdr;
     uint8_t oldcount, count, *sparse, *end, *p, *prev, *next;
@@ -885,6 +935,7 @@ promote: /* Promote to dense representation. */
  * PE is an array with a pre-computer table of values 2^-reg indexed by reg.
  * As a side effect the integer pointed by 'ezp' is set to the number
  * of zero registers. */
+/* 计算系数结构的和 */
 double hllSparseSum(uint8_t *sparse, int sparselen, double *PE, int *ezp, int *invalid) {
     double E = 0;
     int ez = 0, idx = 0, runlen, regval;
@@ -1385,7 +1436,7 @@ void pfselftestCommand(redisClient *c) {
     /* Test 2: approximation error.
      * The test adds unique elements and check that the estimated value
      * is always reasonable bounds.
-     * 
+     *
      * We check that the error is smaller than 4 times than the expected
      * standard error, to make it very unlikely for the test to fail because
      * of a "bad" run.
